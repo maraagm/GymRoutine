@@ -26,6 +26,7 @@ struct HomeView: View {
     }
 
     @State private var routines: [Routine] = []
+    @State private var isScheduleExpanded: Bool = false
 
     @AppStorage("schedule_monday") private var mondayRoutineId: Int = -1
     @AppStorage("schedule_tuesday") private var tuesdayRoutineId: Int = -1
@@ -69,6 +70,13 @@ struct HomeView: View {
                             destination: RoutinesView()
                         )
 
+                        homeActionCard(
+                            title: "Fichaje de Entrenos",
+                            subtitle: "Registra y consulta entrenamientos",
+                            icon: "checkmark.seal.fill",
+                            destination: WorkoutCheckInView()
+                        )
+
                         Spacer(minLength: 20)
                     }
                     
@@ -85,69 +93,84 @@ struct HomeView: View {
 
     private var weeklyScheduleSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Image(systemName: "calendar.badge.clock")
-                    .foregroundColor(Color(red: 220/255, green: 80/255, blue: 80/255))
-                Text("Horario semanal")
-                    .font(.title2.bold())
-                    .foregroundColor(.white)
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isScheduleExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "calendar.badge.clock")
+                        .foregroundColor(Color(red: 220/255, green: 80/255, blue: 80/255))
+                    Text("Horario semanal")
+                        .font(.title2.bold())
+                        .foregroundColor(.white)
+                    Spacer()
+                    Image(systemName: isScheduleExpanded ? "chevron.up" : "chevron.down")
+                        .foregroundColor(.white)
+                        .font(.headline)
+                }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
 
-            if routines.isEmpty {
-                Text("Crea una rutina para poder asignarla a un día.")
-                    .foregroundColor(.gray)
-                    .font(.subheadline)
-            } else {
-                ForEach(WeekDay.allCases) { day in
-                    HStack(spacing: 10) {
-                        Image(systemName: day.icon)
-                            .foregroundColor(Color(red: 220/255, green: 80/255, blue: 80/255))
-                            .frame(width: 20)
+            if isScheduleExpanded {
+                if routines.isEmpty {
+                    Text("Crea una rutina para poder asignarla a un día.")
+                        .foregroundColor(.gray)
+                        .font(.subheadline)
+                } else {
+                    ForEach(WeekDay.allCases) { day in
+                        HStack(spacing: 10) {
+                            Image(systemName: day.icon)
+                                .foregroundColor(Color(red: 220/255, green: 80/255, blue: 80/255))
+                                .frame(width: 20)
 
-                        Text(day.rawValue)
-                            .foregroundColor(.white)
-                            .font(.headline)
+                            Text(day.rawValue)
+                                .foregroundColor(.white)
+                                .font(.headline)
 
-                        Spacer()
+                            Spacer()
 
-                        Menu {
-                            Button("Sin rutina") {
-                                setRoutineId(-1, for: day)
+                            Menu {
+                                Button("Sin rutina") {
+                                    setRoutineId(-1, for: day)
+                                }
+
+                                ForEach(routines) { routine in
+                                    Button(routine.name) {
+                                        setRoutineId(Int(routine.id), for: day)
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text(routineName(for: day))
+                                        .lineLimit(1)
+                                    Image(systemName: "chevron.down")
+                                        .font(.caption)
+                                }
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color.white.opacity(0.14))
+                                .clipShape(Capsule())
                             }
 
-                            ForEach(routines) { routine in
-                                Button(routine.name) {
-                                    setRoutineId(Int(routine.id), for: day)
+                            if let assignedRoutine = routine(for: day) {
+                                NavigationLink(destination: RoutinesReadOnlyView(routine: assignedRoutine)) {
+                                    Image(systemName: "arrow.right.circle.fill")
+                                        .font(.title3)
+                                        .foregroundColor(Color(red: 220/255, green: 80/255, blue: 80/255))
                                 }
                             }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text(routineName(for: day))
-                                    .lineLimit(1)
-                                Image(systemName: "chevron.down")
-                                    .font(.caption)
-                            }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.white.opacity(0.14))
-                            .clipShape(Capsule())
                         }
-
-                        if let assignedRoutine = routine(for: day) {
-                            NavigationLink(destination: RoutinesReadOnlyView(routine: assignedRoutine)) {
-                                Image(systemName: "arrow.right.circle.fill")
-                                    .font(.title3)
-                                    .foregroundColor(Color(red: 220/255, green: 80/255, blue: 80/255))
-                            }
-                        }
+                        .padding(12)
+                        .background(Color.white.opacity(0.08))
+                        .cornerRadius(12)
                     }
-                    .padding(12)
-                    .background(Color.white.opacity(0.08))
-                    .cornerRadius(12)
                 }
             }
         }
+        .animation(.easeInOut(duration: 0.2), value: isScheduleExpanded)
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 16)

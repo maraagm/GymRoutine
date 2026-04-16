@@ -301,6 +301,311 @@ class RoutineExerciseCRUD {
     }
 }
 
+class WorkoutSessionCRUD {
+
+    private static func workoutSessionsHasLegacyCheckInAt() -> Bool {
+        let query = "PRAGMA table_info(WorkoutSessions);"
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(DatabaseManager.shared.db, query, -1, &statement, nil) == SQLITE_OK else {
+            return false
+        }
+
+        defer { sqlite3_finalize(statement) }
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let colPtr = sqlite3_column_text(statement, 1) {
+                let col = String(cString: colPtr)
+                if col.caseInsensitiveCompare("checkInAt") == .orderedSame {
+                    return true
+                }
+            }
+        }
+
+        return false
+    }
+
+    @discardableResult
+    static func startWorkoutSession(routineId: Int64) -> Int64? {
+        let hasLegacyCheckInAt = workoutSessionsHasLegacyCheckInAt()
+        let insertSession = hasLegacyCheckInAt
+            ? "INSERT INTO WorkoutSessions (routineId, startedAt, checkInAt, endedAt) VALUES (?, ?, ?, NULL);"
+            : "INSERT INTO WorkoutSessions (routineId, startedAt, endedAt) VALUES (?, ?, NULL);"
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(DatabaseManager.shared.db, insertSession, -1, &statement, nil) == SQLITE_OK else {
+            print("❌ Error preparing INSERT WorkoutSession")
+            return nil
+        }
+
+        let now = ISO8601DateFormatter().string(from: Date())
+        sqlite3_bind_int64(statement, 1, routineId)
+        sqlite3_bind_text(statement, 2, (now as NSString).utf8String, -1, nil)
+        if hasLegacyCheckInAt {
+            sqlite3_bind_text(statement, 3, (now as NSString).utf8String, -1, nil)
+        }
+
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            print("❌ Error executing INSERT WorkoutSession")
+            sqlite3_finalize(statement)
+            return nil
+        }
+
+        let sessionId = sqlite3_last_insert_rowid(DatabaseManager.shared.db)
+        sqlite3_finalize(statement)
+
+        let snapshotSQL = """
+            INSERT INTO WorkoutSessionExercises (workoutSessionId, exerciseId, weight, series, isCompleted, completedAt)
+            SELECT ?, exerciseId, weight, series, 0, NULL
+            FROM RoutineExercises
+            WHERE routineId = ?;
+            """
+
+        var snapshotStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(DatabaseManager.shared.db, snapshotSQL, -1, &snapshotStmt, nil) == SQLITE_OK else {
+            print("❌ Error preparing snapshot exercises for WorkoutSession")
+            return sessionId
+        }
+
+        sqlite3_bind_int64(snapshotStmt, 1, sessionId)
+        sqlite3_bind_int64(snapshotStmt, 2, routineId)
+
+        if sqlite3_step(snapshotStmt) != SQLITE_DONE {
+            print("❌ Error creating exercise snapshot for WorkoutSession")
+        }
+
+        sqlite3_finalize(snapshotStmt)
+        print("✅ Workout iniciado - ID: \(sessionId)")
+        return sessionId
+    }
+
+    @discardableResult
+    static func finishWorkoutSession(sessionId: Int64) -> Bool {
+        let query = "UPDATE WorkoutSessions SET endedAt = ? WHERE id = ?;"
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(DatabaseManager.shared.db, query, -1, &statement, nil) == SQLITE_OK else {
+            print("❌ Error preparing finish WorkoutSession")
+            return false
+        }
+
+        let now = ISO8601DateFormatter().string(from: Date())
+        sqlite3_bind_text(statement, 1, (now as NSString).utf8String, -1, nil)
+        sqlite3_bind_int64(statement, 2, sessionId)
+
+        let success = sqlite3_step(statement) == SQLITE_DONE
+        sqlite3_finalize(statement)
+        return success
+    }
+
+    static func getActiveWorkoutSession() -> WorkoutSession? {
+        let query = """
+            SELECT ws.id, ws.routineId, r.name, COALESCE(ws.startedAt, ws.checkInAt, ''), ws.endedAt
+            FROM WorkoutSessions ws
+            LEFT JOIN Routines r ON ws.routineId = r.id
+            WHERE ws.endedAt IS NULL OR ws.endedAt = ''
+            ORDER BY COALESCE(ws.startedAt, ws.checkInAt, '') DESC
+            LIMIT 1;
+            """
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(DatabaseManager.shared.db, query, -1, &statement, nil) == SQLITE_OK else {
+            print("❌ Error preparing SELECT active WorkoutSession")
+            return nil
+        }
+
+        defer { sqlite3_finalize(statement) }
+
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            return nil
+        }
+
+        let id = sqlite3_column_int64(statement, 0)
+        let routineId = sqlite3_column_int64(statement, 1)
+        let routineNamePtr = sqlite3_column_text(statement, 2)
+        let routineName = routineNamePtr != nil ? String(cString: routineNamePtr!) : "Rutina"
+        let startedAtPtr = sqlite3_column_text(statement, 3)
+        let startedAt = startedAtPtr != nil ? String(cString: startedAtPtr!) : ""
+        let endedAtPtr = sqlite3_column_text(statement, 4)
+        let endedAt = endedAtPtr != nil ? String(cString: endedAtPtr!) : nil
+
+        return WorkoutSession(
+            id: id,
+            routineId: routineId,
+            routineName: routineName,
+            startedAt: startedAt,
+            endedAt: endedAt
+        )
+    }
+
+    @discardableResult
+    static func setExerciseCompletion(sessionExerciseId: Int64, isCompleted: Bool) -> Bool {
+        let query = "UPDATE WorkoutSessionExercises SET isCompleted = ?, completedAt = ? WHERE id = ?;"
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(DatabaseManager.shared.db, query, -1, &statement, nil) == SQLITE_OK else {
+            print("❌ Error preparing UPDATE workout exercise completion")
+            return false
+        }
+
+        sqlite3_bind_int(statement, 1, isCompleted ? 1 : 0)
+
+        if isCompleted {
+            let now = ISO8601DateFormatter().string(from: Date())
+            sqlite3_bind_text(statement, 2, (now as NSString).utf8String, -1, nil)
+        } else {
+            sqlite3_bind_null(statement, 2)
+        }
+
+        sqlite3_bind_int64(statement, 3, sessionExerciseId)
+
+        let success = sqlite3_step(statement) == SQLITE_DONE
+        sqlite3_finalize(statement)
+        return success
+    }
+
+    @discardableResult
+    static func checkInWorkout(routineId: Int64) -> Int64? {
+        startWorkoutSession(routineId: routineId)
+    }
+
+    static func getAllWorkoutSessions() -> [WorkoutSession] {
+        var list: [WorkoutSession] = []
+        let query = """
+            SELECT ws.id, ws.routineId, r.name, COALESCE(ws.startedAt, ws.checkInAt, ''), ws.endedAt
+            FROM WorkoutSessions ws
+            LEFT JOIN Routines r ON ws.routineId = r.id
+            ORDER BY COALESCE(ws.startedAt, ws.checkInAt, '') DESC;
+            """
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(DatabaseManager.shared.db, query, -1, &statement, nil) == SQLITE_OK else {
+            print("❌ Error preparing SELECT WorkoutSessions")
+            return []
+        }
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let id = sqlite3_column_int64(statement, 0)
+            let routineId = sqlite3_column_int64(statement, 1)
+
+            let routineNamePtr = sqlite3_column_text(statement, 2)
+            let routineName = routineNamePtr != nil ? String(cString: routineNamePtr!) : "Rutina"
+
+            let startedAtPtr = sqlite3_column_text(statement, 3)
+            let startedAt = startedAtPtr != nil ? String(cString: startedAtPtr!) : ""
+
+            let endedAtPtr = sqlite3_column_text(statement, 4)
+            let endedAt = endedAtPtr != nil ? String(cString: endedAtPtr!) : nil
+
+            list.append(
+                WorkoutSession(
+                    id: id,
+                    routineId: routineId,
+                    routineName: routineName,
+                    startedAt: startedAt,
+                    endedAt: endedAt
+                )
+            )
+        }
+
+        sqlite3_finalize(statement)
+        return list
+    }
+
+    static func getWorkoutSessionExercises(for sessionId: Int64) -> [WorkoutSessionExercise] {
+        var list: [WorkoutSessionExercise] = []
+        let query = """
+            SELECT wse.id, wse.workoutSessionId, wse.exerciseId, e.name, wse.weight, wse.series, wse.isCompleted, wse.completedAt
+            FROM WorkoutSessionExercises wse
+            LEFT JOIN Exercises e ON wse.exerciseId = e.id
+            WHERE wse.workoutSessionId = ?
+            ORDER BY wse.id ASC;
+            """
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(DatabaseManager.shared.db, query, -1, &statement, nil) == SQLITE_OK else {
+            print("❌ Error preparing SELECT WorkoutSessionExercises")
+            return []
+        }
+
+        sqlite3_bind_int64(statement, 1, sessionId)
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let id = sqlite3_column_int64(statement, 0)
+            let workoutSessionId = sqlite3_column_int64(statement, 1)
+            let exerciseId = sqlite3_column_int64(statement, 2)
+
+            let exerciseNamePtr = sqlite3_column_text(statement, 3)
+            let exerciseName = exerciseNamePtr != nil ? String(cString: exerciseNamePtr!) : "Ejercicio"
+
+            let weightPtr = sqlite3_column_text(statement, 4)
+            let weight = weightPtr != nil ? String(cString: weightPtr!) : ""
+
+            let seriesPtr = sqlite3_column_text(statement, 5)
+            let series = seriesPtr != nil ? String(cString: seriesPtr!) : ""
+
+            let isCompleted = sqlite3_column_int(statement, 6) == 1
+
+            let completedAtPtr = sqlite3_column_text(statement, 7)
+            let completedAt = completedAtPtr != nil ? String(cString: completedAtPtr!) : nil
+
+            list.append(
+                WorkoutSessionExercise(
+                    id: id,
+                    workoutSessionId: workoutSessionId,
+                    exerciseId: exerciseId,
+                    exerciseName: exerciseName,
+                    weight: weight,
+                    series: series,
+                    isCompleted: isCompleted,
+                    completedAt: completedAt
+                )
+            )
+        }
+
+        sqlite3_finalize(statement)
+        return list
+    }
+
+    @discardableResult
+    static func deleteWorkoutSession(sessionId: Int64) -> Bool {
+        let deleteChildrenSQL = "DELETE FROM WorkoutSessionExercises WHERE workoutSessionId = ?;"
+        var childrenStmt: OpaquePointer?
+
+        guard sqlite3_prepare_v2(DatabaseManager.shared.db, deleteChildrenSQL, -1, &childrenStmt, nil) == SQLITE_OK else {
+            print("❌ Error preparing DELETE WorkoutSessionExercises")
+            return false
+        }
+
+        sqlite3_bind_int64(childrenStmt, 1, sessionId)
+        let childrenDeleted = sqlite3_step(childrenStmt) == SQLITE_DONE
+        sqlite3_finalize(childrenStmt)
+
+        guard childrenDeleted else {
+            print("❌ Error deleting WorkoutSessionExercises")
+            return false
+        }
+
+        let deleteSessionSQL = "DELETE FROM WorkoutSessions WHERE id = ?;"
+        var sessionStmt: OpaquePointer?
+
+        guard sqlite3_prepare_v2(DatabaseManager.shared.db, deleteSessionSQL, -1, &sessionStmt, nil) == SQLITE_OK else {
+            print("❌ Error preparing DELETE WorkoutSession")
+            return false
+        }
+
+        sqlite3_bind_int64(sessionStmt, 1, sessionId)
+        let sessionDeleted = sqlite3_step(sessionStmt) == SQLITE_DONE
+        sqlite3_finalize(sessionStmt)
+
+        if sessionDeleted {
+            print("✅ WorkoutSession deleted - ID: \(sessionId)")
+        }
+
+        return sessionDeleted
+    }
+}
+
 
 
 

@@ -59,14 +59,84 @@ final class DatabaseManager {
                 FOREIGN KEY(exerciseId) REFERENCES Exercises(id) ON DELETE CASCADE
                 );
             """
+
+        let createWorkoutSessions = """
+            CREATE TABLE IF NOT EXISTS WorkoutSessions(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                routineId INTEGER NOT NULL,
+                startedAt TEXT,
+                endedAt TEXT,
+                FOREIGN KEY(routineId) REFERENCES Routines(id) ON DELETE CASCADE
+                );
+            """
+
+        let createWorkoutSessionExercises = """
+            CREATE TABLE IF NOT EXISTS WorkoutSessionExercises(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workoutSessionId INTEGER NOT NULL,
+                exerciseId INTEGER NOT NULL,
+                weight TEXT,
+                series TEXT,
+                isCompleted INTEGER DEFAULT 0,
+                completedAt TEXT,
+                FOREIGN KEY(workoutSessionId) REFERENCES WorkoutSessions(id) ON DELETE CASCADE,
+                FOREIGN KEY(exerciseId) REFERENCES Exercises(id) ON DELETE CASCADE
+                );
+            """
                 
         let success1 = exec(sql: createExercises)
         let success2 = exec(sql: createRoutines)
         let success3 = exec(sql: createRoutineExercises)
+        let success4 = exec(sql: createWorkoutSessions)
+        let success5 = exec(sql: createWorkoutSessionExercises)
         
-        if success1 && success2 && success3 {
+        if success1 && success2 && success3 && success4 && success5 {
             print("Todas las tablas creadas correctamente")
         }
+
+        migrateWorkoutTablesIfNeeded()
+    }
+
+    private func migrateWorkoutTablesIfNeeded() {
+        ensureColumnExists(table: "WorkoutSessions", column: "startedAt", definition: "TEXT")
+        ensureColumnExists(table: "WorkoutSessions", column: "endedAt", definition: "TEXT")
+        ensureColumnExists(table: "WorkoutSessionExercises", column: "isCompleted", definition: "INTEGER DEFAULT 0")
+        ensureColumnExists(table: "WorkoutSessionExercises", column: "completedAt", definition: "TEXT")
+
+        if columnExists(table: "WorkoutSessions", column: "checkInAt") {
+            _ = exec(sql: """
+                UPDATE WorkoutSessions
+                SET startedAt = checkInAt
+                WHERE (startedAt IS NULL OR startedAt = '')
+                AND checkInAt IS NOT NULL;
+                """)
+        }
+    }
+
+    private func ensureColumnExists(table: String, column: String, definition: String) {
+        guard !columnExists(table: table, column: column) else { return }
+        _ = exec(sql: "ALTER TABLE \(table) ADD COLUMN \(column) \(definition);")
+    }
+
+    private func columnExists(table: String, column: String) -> Bool {
+        let query = "PRAGMA table_info(\(table));"
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else {
+            return false
+        }
+
+        defer { sqlite3_finalize(statement) }
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let columnName = sqlite3_column_text(statement, 1) {
+                if String(cString: columnName).caseInsensitiveCompare(column) == .orderedSame {
+                    return true
+                }
+            }
+        }
+
+        return false
     }
             
     @discardableResult
