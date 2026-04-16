@@ -278,6 +278,27 @@ class RoutineExerciseCRUD {
         if success { print("✅ RoutineExercise deleted - ID: \(re.id)") }
         return success
     }
+
+    @discardableResult
+    static func updateRoutineExercise(_ re: RoutineExercise) -> Bool {
+        let query = "UPDATE RoutineExercises SET weight = ?, series = ? WHERE id = ?;"
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(DatabaseManager.shared.db, query, -1, &statement, nil) == SQLITE_OK else {
+            print("❌ Error preparing UPDATE RoutineExercise")
+            return false
+        }
+
+        let weightStr = String(re.weight)
+        sqlite3_bind_text(statement, 1, (weightStr as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(statement, 2, (re.series as NSString).utf8String, -1, nil)
+        sqlite3_bind_int64(statement, 3, re.id)
+
+        let success = sqlite3_step(statement) == SQLITE_DONE
+        sqlite3_finalize(statement)
+        if success { print("✅ RoutineExercise updated - ID: \(re.id)") }
+        return success
+    }
 }
 
 

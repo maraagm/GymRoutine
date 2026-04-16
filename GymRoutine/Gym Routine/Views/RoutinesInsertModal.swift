@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct RoutineInsertModal: View {
+struct RoutinesInsertModal: View {
     @Environment(\.dismiss) var dismiss
     @State private var name = ""
     @State private var description = ""

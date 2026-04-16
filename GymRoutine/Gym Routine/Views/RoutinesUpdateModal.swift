@@ -1,13 +1,16 @@
 import SwiftUI
 
-struct RoutineUpdateModal: View {
+struct RoutinesUpdateModal: View {
     @Environment(\.dismiss) var dismiss
     @State var routine: Routine
     @State private var allExercises: [Exercise] = []
-    @State private var selectedExerciseId: Int64?
+    @State private var selectedExerciseId: Int64 = -1
     @State private var weight = ""
     @State private var series = ""
     @State private var routineExercises: [RoutineExercise] = []
+    @State private var editingRoutineExercise: RoutineExercise?
+    @State private var editWeight = ""
+    @State private var editSeries = ""
     
     var onUpdate: (Routine) -> Void
     var onDelete: (Routine) -> Void
@@ -22,9 +25,9 @@ struct RoutineUpdateModal: View {
                 
                 Section(header: Text("Añadir ejercicio a rutina")) {
                     Picker("Ejercicio", selection: $selectedExerciseId) {
-                        Text("Selecciona").tag(Int64?.none)
+                        Text("Selecciona").tag(Int64(-1))
                         ForEach(allExercises) { ex in
-                            Text(ex.name).tag(Int64?(ex.id))
+                            Text(ex.name).tag(ex.id)
                         }
                     }
                     
@@ -33,28 +36,52 @@ struct RoutineUpdateModal: View {
                     TextField("Series", text: $series)
                     
                     Button("Añadir") {
-                        guard let exId = selectedExerciseId else { return }
+                        guard selectedExerciseId > 0 else { return }
+                        let exId = selectedExerciseId
                         let re = RoutineExercise(id: 0, routineId: routine.id, exerciseId: exId,
                                                  weight: Double(weight) ?? 0, series: series)
-                        if let newId = RoutineExerciseCRUD.insertRoutineExercise(re) {
-                            routineExercises.append(RoutineExercise(id: newId, routineId: routine.id,
-                                                                    exerciseId: exId,
-                                                                    weight: Double(weight) ?? 0, series: series))
+                        if RoutineExerciseCRUD.insertRoutineExercise(re) != nil {
+                            routineExercises = RoutineExerciseCRUD.getRoutineExercises(for: routine.id)
                         }
-                        selectedExerciseId = nil
                         weight = ""
                         series = ""
                     }
+                    .disabled(selectedExerciseId <= 0)
                 }
                 
                 Section(header: Text("Ejercicios añadidos")) {
                     ForEach(routineExercises) { re in
                         if let ex = allExercises.first(where: { $0.id == re.exerciseId }) {
                             HStack {
-                                Text(ex.name)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(ex.name)
+                                    Text("\(re.weight, specifier: "%.1f") kg · \(re.series) series")
+                                        .foregroundColor(.gray)
+                                        .font(.subheadline)
+                                }
                                 Spacer()
-                                Text("\(re.weight, specifier: "%.1f") kg · \(re.series) series")
-                                    .foregroundColor(.gray)
+
+                                Button {
+                                    editingRoutineExercise = re
+                                    editWeight = String(format: "%.1f", re.weight)
+                                    editSeries = re.series
+                                } label: {
+                                    Image(systemName: "pencil.circle.fill")
+                                        .foregroundColor(.blue)
+                                        .font(.title3)
+                                }
+                                .buttonStyle(.plain)
+
+                                Button {
+                                    if RoutineExerciseCRUD.deleteRoutineExercise(re) {
+                                        routineExercises.removeAll { $0.id == re.id }
+                                    }
+                                } label: {
+                                    Image(systemName: "trash.circle.fill")
+                                        .foregroundColor(.red)
+                                        .font(.title3)
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -93,6 +120,41 @@ struct RoutineUpdateModal: View {
             .onAppear {
                 allExercises = CRUDOperations.getAllExercises()
                 routineExercises = RoutineExerciseCRUD.getRoutineExercises(for: routine.id)
+            }
+            .sheet(item: $editingRoutineExercise) { re in
+                NavigationView {
+                    Form {
+                        Section(header: Text("Editar carga")) {
+                            TextField("Peso (kg)", text: $editWeight)
+                                .keyboardType(.decimalPad)
+                            TextField("Series", text: $editSeries)
+                        }
+                    }
+                    .navigationTitle("Editar ejercicio")
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancelar") {
+                                editingRoutineExercise = nil
+                            }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Guardar") {
+                                let updated = RoutineExercise(
+                                    id: re.id,
+                                    routineId: re.routineId,
+                                    exerciseId: re.exerciseId,
+                                    weight: Double(editWeight) ?? re.weight,
+                                    series: editSeries
+                                )
+
+                                if RoutineExerciseCRUD.updateRoutineExercise(updated) {
+                                    routineExercises = RoutineExerciseCRUD.getRoutineExercises(for: routine.id)
+                                    editingRoutineExercise = nil
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
