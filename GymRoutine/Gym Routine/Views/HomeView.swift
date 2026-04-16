@@ -43,6 +43,7 @@ struct HomeView: View {
                             .shadow(color: Color.red.opacity(0.6), radius: 10, x: 0, y: 5)
                     }
                     
+                    NavigationLink(destination: RoutinesView()) {
                         Text("Gestión de Rutinas")
                             .font(.title2.bold())
                             .foregroundColor(.white)
@@ -60,8 +61,9 @@ struct HomeView: View {
                             )
                             .cornerRadius(16)
                             .shadow(color: Color.red.opacity(0.5), radius: 10, x: 0, y: 5)
-                        
-                        Spacer()
+                    }
+                    
+                    Spacer()
                     }
                     .padding(.horizontal)
                 }

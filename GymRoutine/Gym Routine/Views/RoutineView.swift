@@ -80,6 +80,10 @@ struct RoutinesView: View {
                         routines[idx] = updated
                     }
                 }
+            }, onDelete: { routineToDelete in
+                if CRUDOperations.deleteRoutine(routine: routineToDelete) {
+                    routines.removeAll { $0.id == routineToDelete.id }
+                }
             })
         }
     }

@@ -44,8 +44,8 @@ final class DatabaseManager {
         let createRoutines = """
             CREATE TABLE IF NOT EXISTS Routines(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL)
-                description TEXT;
+                name TEXT NOT NULL,
+                description TEXT);
             """
                 
         let createRoutineExercises = """

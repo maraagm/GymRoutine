@@ -10,6 +10,7 @@ struct RoutineUpdateModal: View {
     @State private var routineExercises: [RoutineExercise] = []
     
     var onUpdate: (Routine) -> Void
+    var onDelete: (Routine) -> Void
     
     var body: some View {
         NavigationView {
@@ -27,7 +28,7 @@ struct RoutineUpdateModal: View {
                         }
                     }
                     
-                    TextField("Peso", text: $weight)
+                    TextField("Peso (kg)", text: $weight)
                         .keyboardType(.decimalPad)
                     TextField("Series", text: $series)
                     
@@ -35,9 +36,11 @@ struct RoutineUpdateModal: View {
                         guard let exId = selectedExerciseId else { return }
                         let re = RoutineExercise(id: 0, routineId: routine.id, exerciseId: exId,
                                                  weight: Double(weight) ?? 0, series: series)
-                        RoutineExerciseCRUD.insertRoutineExercise(re)
-                        routineExercises.append(re)
-                        // limpiar campos
+                        if let newId = RoutineExerciseCRUD.insertRoutineExercise(re) {
+                            routineExercises.append(RoutineExercise(id: newId, routineId: routine.id,
+                                                                    exerciseId: exId,
+                                                                    weight: Double(weight) ?? 0, series: series))
+                        }
                         selectedExerciseId = nil
                         weight = ""
                         series = ""
@@ -45,14 +48,32 @@ struct RoutineUpdateModal: View {
                 }
                 
                 Section(header: Text("Ejercicios añadidos")) {
-                    List(routineExercises, id: \.id) { re in
+                    ForEach(routineExercises) { re in
                         if let ex = allExercises.first(where: { $0.id == re.exerciseId }) {
                             HStack {
                                 Text(ex.name)
                                 Spacer()
-                                Text("\(re.weight) kg / \(re.series) series")
+                                Text("\(re.weight, specifier: "%.1f") kg · \(re.series) series")
                                     .foregroundColor(.gray)
                             }
+                        }
+                    }
+                    .onDelete { indexSet in
+                        for idx in indexSet {
+                            RoutineExerciseCRUD.deleteRoutineExercise(routineExercises[idx])
+                        }
+                        routineExercises.remove(atOffsets: indexSet)
+                    }
+                }
+                
+                Section {
+                    Button(role: .destructive) {
+                        onDelete(routine)
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Image(systemName: "trash")
+                            Text("Eliminar rutina")
                         }
                     }
                 }

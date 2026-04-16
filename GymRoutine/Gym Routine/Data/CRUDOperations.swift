@@ -171,7 +171,7 @@ class CRUDOperations {
     
     static func getAllRoutines() -> [Routine] {
         var list: [Routine] = []
-        let query = "SELECT id, name FROM Routines;"
+        let query = "SELECT id, name, description FROM Routines;"
         var statement: OpaquePointer?
         
         guard sqlite3_prepare_v2(DatabaseManager.shared.db, query, -1, &statement, nil) == SQLITE_OK else {
@@ -184,18 +184,99 @@ class CRUDOperations {
             
             let namePtr = sqlite3_column_text(statement, 1)
             let name = namePtr != nil ? String(cString: namePtr!) : ""
-            let description = namePtr != nil ? String(cString: namePtr!) : ""
+            
+            let descPtr = sqlite3_column_text(statement, 2)
+            let description = descPtr != nil ? String(cString: descPtr!) : ""
 
-            let routine = Routine(id:id, name:name, description:description)
+            let routine = Routine(id: id, name: name, description: description)
             list.append(routine)
             
             print("🔍 Read in BD: ID=\(id), Name='\(name)'")
-
         }
         
         sqlite3_finalize(statement)
         print("📊 Total routines readed: \(list.count)")
-        return []
+        return list
+    }
+}
+
+class RoutineExerciseCRUD {
+
+    @discardableResult
+    static func insertRoutineExercise(_ re: RoutineExercise) -> Int64? {
+        let query = "INSERT INTO RoutineExercises (routineId, exerciseId, weight, series) VALUES (?,?,?,?);"
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(DatabaseManager.shared.db, query, -1, &statement, nil) == SQLITE_OK else {
+            print("❌ Error preparing INSERT RoutineExercise")
+            return nil
+        }
+
+        sqlite3_bind_int64(statement, 1, re.routineId)
+        sqlite3_bind_int64(statement, 2, re.exerciseId)
+        let weightStr = String(re.weight)
+        sqlite3_bind_text(statement, 3, (weightStr as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(statement, 4, (re.series as NSString).utf8String, -1, nil)
+
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            print("❌ Error executing INSERT RoutineExercise")
+            sqlite3_finalize(statement)
+            return nil
+        }
+
+        let lastId = sqlite3_last_insert_rowid(DatabaseManager.shared.db)
+        sqlite3_finalize(statement)
+        print("✅ RoutineExercise inserted - ID: \(lastId)")
+        return lastId
+    }
+
+    static func getRoutineExercises(for routineId: Int64) -> [RoutineExercise] {
+        var list: [RoutineExercise] = []
+        let query = "SELECT id, routineId, exerciseId, weight, series FROM RoutineExercises WHERE routineId = ?;"
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(DatabaseManager.shared.db, query, -1, &statement, nil) == SQLITE_OK else {
+            print("❌ Error preparing SELECT RoutineExercises")
+            return []
+        }
+
+        sqlite3_bind_int64(statement, 1, routineId)
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let id = sqlite3_column_int64(statement, 0)
+            let rId = sqlite3_column_int64(statement, 1)
+            let exId = sqlite3_column_int64(statement, 2)
+
+            let weightPtr = sqlite3_column_text(statement, 3)
+            let weightStr = weightPtr != nil ? String(cString: weightPtr!) : "0"
+            let weight = Double(weightStr) ?? 0
+
+            let seriesPtr = sqlite3_column_text(statement, 4)
+            let series = seriesPtr != nil ? String(cString: seriesPtr!) : ""
+
+            list.append(RoutineExercise(id: id, routineId: rId, exerciseId: exId, weight: weight, series: series))
+        }
+
+        sqlite3_finalize(statement)
+        return list
+    }
+
+    @discardableResult
+    static func deleteRoutineExercise(_ re: RoutineExercise) -> Bool {
+        let query = "DELETE FROM RoutineExercises WHERE id = ?;"
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(DatabaseManager.shared.db, query, -1, &statement, nil) == SQLITE_OK else {
+            print("❌ Error preparing DELETE RoutineExercise")
+            return false
+        }
+
+        sqlite3_bind_int64(statement, 1, re.id)
+
+        let success = sqlite3_step(statement) == SQLITE_DONE
+        sqlite3_finalize(statement)
+        if success { print("✅ RoutineExercise deleted - ID: \(re.id)") }
+        return success
     }
 }
 
